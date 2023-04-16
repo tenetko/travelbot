@@ -1,7 +1,10 @@
 import os
-import telebot
 from datetime import datetime
+
+import telebot
+
 from travelpayouts import TravelpayoutsParser
+
 
 class TicketBot:
     MONTHS = {
@@ -18,19 +21,24 @@ class TicketBot:
         "ноября": "11",
         "декабря": "12",
     }
+
     def __init__(self):
         self.tp = TravelpayoutsParser()
         self.org_iata = ""
         self.dst_iata = ""
         self.dep_date = ""
         self.ret_date = ""
+        self.log_record = ""
 
     def run(self):
         bot = telebot.TeleBot(os.environ.get("TELEGRAM_TOKEN"))
 
         @bot.message_handler(commands=["start"])
         def start_message(message):
-            bot.send_message(message.chat.id, "Вы хотите улететь? Если да, то введите 1. Если нет - то 0")
+            bot.send_message(
+                message.chat.id,
+                "Вы хотите улететь? Если да, то введите 1. Если нет - то 0",
+            )
 
         @bot.message_handler(content_types=["text"])
         def handle_input(message):
@@ -48,6 +56,7 @@ class TicketBot:
         @bot.message_handler(content_types=["text"])
         def get_org_iata_code(message):
             self.org_iata = self.tp.translate_to_iata(message.text)
+            self.log_record = self.log_record + self.org_iata + " "
             if self.org_iata == "":
                 bot.send_message(message.chat.id, "Не знаю такого города! Давайте начнём сначала")
                 bot.clear_step_handler(message)
@@ -58,6 +67,7 @@ class TicketBot:
         @bot.message_handler(content_types=["text"])
         def get_dst_iata_code(message):
             self.dst_iata = self.tp.translate_to_iata(message.text)
+            self.log_record = self.log_record + self.dst_iata + " "
             if self.dst_iata == "":
                 bot.send_message(message.chat.id, "Не знаю такого города! Давайте начнём сначала")
                 bot.clear_step_handler(message)
@@ -69,19 +79,21 @@ class TicketBot:
         def get_dep_date(message):
             try:
                 self.dep_date = self.convert_date(message.text)
+                self.log_record = self.log_record + self.dep_date + " "
 
                 bot.send_message(
                     message.chat.id,
-                    'Введите дату возвращения или отправьте "нет", если вам не нужен обратный билет\n' +
-                    'Формат: 01.01.2023, 1 января 2023',
-                    )
+                    'Введите дату возвращения или отправьте "нет",'
+                    + "если вам не нужен обратный билет\n"
+                    + "Формат: 01.01.2023, 1 января 2023",
+                )
                 bot.register_next_step_handler(message, get_ret_date)
 
-            except ValueError as e:
+            except ValueError:
                 bot.send_message(message.chat.id, "Не могу понять эту дату! Давайте начнём сначала")
                 bot.clear_step_handler(message)
 
-            except KeyError as e:
+            except KeyError:
                 bot.send_message(message.chat.id, "Не могу понять эту дату! Давайте начнём сначала")
                 bot.clear_step_handler(message)
 
@@ -89,14 +101,15 @@ class TicketBot:
         def get_ret_date(message):
             try:
                 self.ret_date = self.get_return_date(message.text)
+                self.log_record = self.log_record + self.ret_date + " "
                 display_results(message)
                 bot.clear_step_handler(message)
 
-            except ValueError as e:
+            except ValueError:
                 bot.send_message(message.chat.id, "Не могу понять эту дату! Давайте начнём сначала")
                 bot.clear_step_handler(message)
 
-            except KeyError as e:
+            except KeyError:
                 bot.send_message(message.chat.id, "Не могу понять эту дату! Давайте начнём сначала")
                 bot.clear_step_handler(message)
 
@@ -104,16 +117,27 @@ class TicketBot:
         def display_results(message):
             search_result = self.tp.make_price_request(self.org_iata, self.dst_iata, self.dep_date, self.ret_date)
 
-            if search_result['data'] is None:
-                bot.send_message(message.chat.id, "Разница между двумя датами не должна быть больше 30 дней")
+            if search_result["data"] is None:
+                bot.send_message(
+                    message.chat.id,
+                    "Разница между двумя датами не должна быть больше 30 дней",
+                )
 
-            elif len(search_result['data']) == 0:
+            elif len(search_result["data"]) == 0:
                 bot.send_message(message.chat.id, "Я не нашёл билетов! Давайте начнём сначала")
 
             else:
-                price = search_result['data'][0]['price']
-                url = 'https://www.aviasales.ru' + search_result['data'][0]['link']
-                bot.send_message(message.chat.id, f"Цена: {price}. [Ссылка на билет]({url})", parse_mode='Markdown')
+                price = search_result["data"][0]["price"]
+                url = "https://www.aviasales.ru" + search_result["data"][0]["link"]
+                self.log_record = self.log_record + price + " " + url
+                print(self.log_record)
+                self.log_record = ""
+
+                bot.send_message(
+                    message.chat.id,
+                    f"Цена: {price}. [Ссылка на билет]({url})",
+                    parse_mode="Markdown",
+                )
 
         bot.infinity_polling()
 
@@ -131,20 +155,20 @@ class TicketBot:
 
                 date_string = ".".join(date_split)
 
-        if '.' in date:
+        if "." in date:
             date_string = date + "." + datetime.strftime(datetime.now(), "%Y")
 
-        parsed_date = datetime.strptime(date_string, '%d.%m.%Y')
-        date_string = datetime.strftime(parsed_date, '%Y-%m-%d')
+        parsed_date = datetime.strptime(date_string, "%d.%m.%Y")
+        date_string = datetime.strftime(parsed_date, "%Y-%m-%d")
 
         return date_string
-
 
     def get_return_date(self, date):
         if date.lower() == "нет":
             return ""
 
         return self.convert_date(date)
+
 
 if __name__ == "__main__":
     bot = TicketBot()
